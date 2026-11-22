@@ -1,0 +1,19 @@
+[application]
+name = "scan2fil"
+default_platform = "ios"
+
+[desktop]
+title = "scan2fil"
+
+[bundle]
+identifier = "com.mayorana.scan2fil"
+publisher = "Mayorana"
+icon = ["assets/icon.png"]
+
+[ios]
+# The file picker offers "Take Photo" and "Photo Library"; iOS asks for these.
+[ios.plist]
+NSCameraUsageDescription = "scan2fil photographs the document you want to fill in."
+NSPhotoLibraryUsageDescription = "scan2fil reads the photo of the document you want to fill in."
+
+[android]

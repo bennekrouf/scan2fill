@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- "Take a photo" asks the camera app for a picture: Android 11 and later
+         only let the app find a camera app it has declared it looks for. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
+    <application>
+        <!-- Sign-in: the provider's page redirects here when it is done. The
+             schemes are the iOS app's (config.rs): Google's is its client id
+             reversed, so it changes with SCAN2FIL_GOOGLE_CLIENT_ID. -->
+        <activity
+            android:name="com.mayorana.scan2fil.platform.SignInRedirectActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.googleusercontent.apps.454981824324-02550tabshru5ni73gklgn1m3s6mha9p" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="msauth.com.mayorana.scan2fil" android:host="auth" />
+            </intent-filter>
+        </activity>
+
+        <!-- The camera app writes the photo to a file it is handed through
+             this provider; the WebView's file chooser looks for it under
+             <package>.fileprovider. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/scan2fil_file_paths" />
+        </provider>
+    </application>
+</manifest>

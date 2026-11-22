@@ -1,0 +1,8 @@
+/target
+.DS_Store
+/.tools
+*.ipa
+/target/ios
+*.apk
+*.aab
+.env

@@ -1,0 +1,5 @@
+# OAuth client ids scan2fil signs in with (public by design; see src/config.rs).
+# Every build reads them here, including ShipScreen's.
+[env]
+SCAN2FIL_GOOGLE_CLIENT_ID = "454981824324-02550tabshru5ni73gklgn1m3s6mha9p.apps.googleusercontent.com"
+SCAN2FIL_MICROSOFT_CLIENT_ID = "39a1debe-0780-4b59-94b9-d8c5c0685af8"

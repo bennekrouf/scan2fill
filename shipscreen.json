@@ -1,0 +1,58 @@
+{
+  "source_paths": [],
+  "locale_sources": {
+    "en-US": []
+  },
+  "manual_texts": [],
+  "locale_texts": {
+    "en-US": []
+  },
+  "primary_color": "#1A56DB",
+  "secondary_color": "#EEF3FF",
+  "theme_prompt": "",
+  "theme_history": [],
+  "locale": "en-US",
+  "locales": [
+    "en-US"
+  ],
+  "generated_urls": [],
+  "output_paths": [],
+  "logo_path": null,
+  "logo_dest": "",
+  "app_name": "scan2fil",
+  "project_slug": "scan2fil",
+  "ios_bundle_id": "com.mayorana.scan2fil",
+  "android_bundle_id": "com.mayorana.scan2fil",
+  "platform_type": "ios_android",
+  "export_ios": true,
+  "export_android": true,
+  "ios_targets": [
+    true,
+    true,
+    true,
+    true
+  ],
+  "android_targets": [
+    true,
+    true
+  ],
+  "desktop_targets": [
+    true,
+    true,
+    true
+  ],
+  "version": "1.0",
+  "ios_build_number": 2,
+  "android_version_code": 2,
+  "auto_increment_build": true,
+  "provisioning_profile": "/Users/mb/Library/MobileDevice/Provisioning Profiles/scan2fil-2026.mobileprovision",
+  "ios_artifact_path": "",
+  "android_artifact_path": "",
+  "store_texts": {},
+  "support_url": "",
+  "exempt_encryption": true,
+  "play_track": "internal",
+  "play_release_status": "draft",
+  "releases": [],
+  "android_key_alias": ""
+}

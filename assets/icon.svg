@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f7bff"/>
+      <stop offset="1" stop-color="#1240a8"/>
+    </linearGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef3ff"/>
+    </linearGradient>
+  </defs>
+  <!-- Full-bleed and opaque: iOS rounds the corners itself. -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Scan frame: four corner brackets. -->
+  <g fill="none" stroke="#9fd2ff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M168 330 V200 a32 32 0 0 1 32 -32 H330"/>
+    <path d="M694 168 H824 a32 32 0 0 1 32 32 V330"/>
+    <path d="M856 694 V824 a32 32 0 0 1 -32 32 H694"/>
+    <path d="M330 856 H200 a32 32 0 0 1 -32 -32 V694"/>
+  </g>
+
+  <!-- The page, with a folded corner. -->
+  <path d="M300 236 H636 L736 336 V752 a36 36 0 0 1 -36 36 H300 a36 36 0 0 1 -36 -36 V272 a36 36 0 0 1 36 -36 Z" fill="url(#page)"/>
+  <path d="M636 236 V300 a36 36 0 0 0 36 36 H736 Z" fill="#c9d8ff"/>
+
+  <!-- Blank lines to fill in. -->
+  <g stroke="#c3cfe8" stroke-width="22" stroke-linecap="round">
+    <line x1="330" y1="318" x2="560" y2="318"/>
+    <line x1="330" y1="736" x2="670" y2="736"/>
+  </g>
+
+  <!-- The question. -->
+  <path d="M422 452 a90 90 0 1 1 134 78 c-28 16 -44 30 -44 58 v8"
+        fill="none" stroke="#1a56db" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="672" r="34" fill="#ff8a3d"/>
+</svg>

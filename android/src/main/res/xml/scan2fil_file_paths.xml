@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where the WebView puts the photo the camera takes. -->
+    <external-files-path name="photos" path="Pictures/" />
+    <!-- The filled form's PDF, written to the cache folder before it is shared. -->
+    <cache-path name="pdfs" path="." />
+</paths>

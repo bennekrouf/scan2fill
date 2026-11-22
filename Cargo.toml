@@ -1,0 +1,50 @@
+[package]
+name = "scan2fil"
+version = "0.1.0"
+edition = "2021"
+description = "Photograph a form or letter; get the questions to answer to fill it in."
+publish = false
+
+[dependencies]
+dioxus = { version = "=0.8.0-alpha.3", features = [] }
+# rustls, not the platform TLS: the same stack on iOS, Android and the desktop build.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+# Decoding and shrinking the photo before it is sent: api0 takes at most 8 MiB.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+tokio = { version = "1", features = ["rt", "time"] }
+dirs = "6"
+sha2 = "0.10"
+getrandom = "0.3"
+
+[features]
+default = ["mobile"]
+mobile = ["dioxus/mobile"]
+# For trying the screens on the Mac: `dx serve --platform desktop --no-default-features --features desktop`.
+desktop = ["dioxus/desktop"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+# iOS: the system sign-in sheet (ASWebAuthenticationSession) and the Keychain.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = "0.3"
+objc2-ui-kit = "0.3"
+objc2-authentication-services = "0.3"
+objc2-vision = "0.3"
+objc2-core-foundation = "0.3"
+security-framework = "3"
+
+# Android: the Gradle module in android/ (camera provider, and later sign-in and sharing).
+[target.'cfg(target_os = "android")'.dependencies]
+manganis = "=0.8.0-alpha.3"
