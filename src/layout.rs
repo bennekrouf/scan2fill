@@ -24,29 +24,64 @@ pub struct Line {
     pub words: Vec<Word>,
 }
 
-/// `fields`, with each answer's and each tick's place taken from the printed
-/// text where its label is found there.
+#[cfg(test)]
 pub fn snap(fields: &[Field], lines: &[Line]) -> Vec<Field> {
+    snapped(fields, lines).0
+}
+
+/// `fields`, with each answer's and each tick's place taken from the printed
+/// text where its label is found there, and how many labels were found.
+pub fn snapped(fields: &[Field], lines: &[Line]) -> (Vec<Field>, usize) {
     let mut lines: Vec<&Line> = lines.iter().filter(|l| !l.words.is_empty()).collect();
     lines.sort_by(|a, b| top(a).total_cmp(&top(b)));
     let mut used = HashSet::new();
-    fields
+    let mut found_labels = 0;
+    let mut placed = Vec::new();
+    let mut fields: Vec<Field> = fields
         .iter()
-        .map(|f| {
+        .enumerate()
+        .map(|(i, f)| {
             let mut f = f.clone();
             for c in f.choices.iter_mut() {
                 if let Some(found) = find(&lines, &c.label, &mut used) {
                     let o = union(&found.words);
                     // The tick box sits just left of the option's text.
-                    c.area = Some(Area { x: (o.x - o.h * 1.4).max(0.0), y: o.y, w: o.h, h: o.h });
+                    c.area = Some(Area {
+                        x: (o.x - o.h * 1.4).max(0.0),
+                        y: o.y,
+                        w: o.h,
+                        h: o.h,
+                    });
                 }
             }
             if let Some(found) = find(&lines, &f.label, &mut used) {
-                f.area = Some(after(&found));
+                f.area = Some(after(&found, &lines));
+                found_labels += 1;
+                placed.push(i);
             }
             f
         })
-        .collect()
+        .collect();
+    even_out(&mut fields, &placed);
+    (fields, found_labels)
+}
+
+/// Every answer placed from the printed text written the same size: as high
+/// as the page's usual line, centred on its own, so a line made taller by
+/// brackets or accents does not get a bigger answer than the rest.
+fn even_out(fields: &mut [Field], placed: &[usize]) {
+    let mut heights: Vec<f32> = placed.iter().filter_map(|&i| fields[i].area).map(|a| a.h).collect();
+    if heights.len() < 2 {
+        return;
+    }
+    heights.sort_by(f32::total_cmp);
+    let usual = heights[heights.len() / 2];
+    for &i in placed {
+        if let Some(a) = fields[i].area.as_mut() {
+            a.y += (a.h - usual) / 2.0;
+            a.h = usual;
+        }
+    }
 }
 
 fn top(l: &Line) -> f32 {
@@ -61,14 +96,26 @@ struct Found<'a> {
 }
 
 /// The first unused run of words in `lines` that spells `label`.
-fn find<'a>(lines: &[&'a Line], label: &str, used: &mut HashSet<(usize, usize)>) -> Option<Found<'a>> {
-    let wanted: Vec<String> = label.split_whitespace().map(fold).filter(|t| !t.is_empty()).collect();
+fn find<'a>(
+    lines: &[&'a Line],
+    label: &str,
+    used: &mut HashSet<(usize, usize)>,
+) -> Option<Found<'a>> {
+    let wanted: Vec<String> = label
+        .split_whitespace()
+        .map(fold)
+        .filter(|t| !t.is_empty())
+        .collect();
     if wanted.is_empty() {
         return None;
     }
     // The model sometimes writes a longer label than is printed: the start of
     // it, of two words or more, is enough.
-    let shortest = if wanted.len() == 1 { 1 } else { 2.max(wanted.len() / 2) };
+    let shortest = if wanted.len() == 1 {
+        1
+    } else {
+        2.max(wanted.len() / 2)
+    };
     for len in (shortest..=wanted.len()).rev() {
         let want = &wanted[..len];
         for (li, line) in lines.iter().enumerate() {
@@ -85,7 +132,8 @@ fn find<'a>(lines: &[&'a Line], label: &str, used: &mut HashSet<(usize, usize)>)
                 }
                 for (k, w) in want.iter().enumerate() {
                     let (wi, t) = &tokens[s + k];
-                    let same = t == w || (k == 0 && t.ends_with(w.as_str()) && t.len() <= w.len() + 1);
+                    let same = close(t, w)
+                        || (k == 0 && t.ends_with(w.as_str()) && t.len() <= w.len() + 1);
                     if !same || used.contains(&(li, *wi)) {
                         continue 'start;
                     }
@@ -94,50 +142,145 @@ fn find<'a>(lines: &[&'a Line], label: &str, used: &mut HashSet<(usize, usize)>)
                 let last = tokens[s + want.len() - 1].0;
                 // The colon or dots right after the label belong to it.
                 let mut next = last + 1;
-                while next < line.words.len() && fold(&line.words[next].text).is_empty() && !is_blank(&line.words[next].text) {
+                while next < line.words.len()
+                    && fold(&line.words[next].text).is_empty()
+                    && !is_blank(&line.words[next].text)
+                {
                     next += 1;
                 }
                 for i in first..=last {
                     used.insert((li, i));
                 }
-                return Some(Found { line, words: line.words[first..next].to_vec(), next });
+                return Some(Found {
+                    line,
+                    words: line.words[first..next].to_vec(),
+                    next,
+                });
             }
         }
     }
     None
 }
 
+/// The same word, allowing a reader's slip of one letter in a long one:
+/// "1etablissement" for "letablissement", "titųlaire" for "titulaire".
+fn close(read: &str, wanted: &str) -> bool {
+    if read == wanted {
+        return true;
+    }
+    let (a, b): (Vec<char>, Vec<char>) = (read.chars().collect(), wanted.chars().collect());
+    if b.len() < 5 || a.len().abs_diff(b.len()) > 1 {
+        return false;
+    }
+    let head = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let tail = a[head..]
+        .iter()
+        .rev()
+        .zip(b[head..].iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count();
+    // One letter changed, added or left out: what differs fits in one.
+    a.len().max(b.len()) - head - tail <= 1
+}
+
 /// Underscores or dots drawn as the line to write on.
 fn is_blank(t: &str) -> bool {
-    t.chars().filter(|c| matches!(c, '_' | '.' | '…' | '-')).count() >= 3
+    t.chars()
+        .filter(|c| matches!(c, '_' | '.' | '…' | '-'))
+        .count()
+        >= 3
 }
 
 fn union(words: &[Word]) -> Area {
     let x0 = words.iter().map(|w| w.area.x).fold(f32::MAX, f32::min);
     let y0 = words.iter().map(|w| w.area.y).fold(f32::MAX, f32::min);
-    let x1 = words.iter().map(|w| w.area.x + w.area.w).fold(f32::MIN, f32::max);
-    let y1 = words.iter().map(|w| w.area.y + w.area.h).fold(f32::MIN, f32::max);
-    Area { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    let x1 = words
+        .iter()
+        .map(|w| w.area.x + w.area.w)
+        .fold(f32::MIN, f32::max);
+    let y1 = words
+        .iter()
+        .map(|w| w.area.y + w.area.h)
+        .fold(f32::MIN, f32::max);
+    Area {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
+    }
 }
 
 /// The space for the answer: after the label, up to the next printed word on
 /// its line (the next field's label), or under it when the line is full.
-fn after(found: &Found) -> Area {
+fn after(found: &Found, lines: &[&Line]) -> Area {
     let l = union(&found.words);
-    let start = l.x + l.w + 0.008;
+    let row = union(&found.line.words);
+    // Some readers (Google's) return the label's last word and the dotted
+    // line after it as one word: "compte..........". The answer then starts
+    // where its letters end, and goes on that line.
+    let glued = found.words.last().and_then(|w| {
+        let chars: Vec<char> = w.text.chars().collect();
+        let letters = chars.iter().rposition(|c| c.is_alphanumeric())? + 1;
+        let tail: String = chars[letters..].iter().collect();
+        is_blank(&tail).then(|| {
+            // ":" or ")" right after the letters belong to the label.
+            let kept = letters + tail.chars().take_while(|c| matches!(c, ':' | ')' | ' ')).count();
+            w.area.x + w.area.w * kept as f32 / chars.len() as f32
+        })
+    });
+    let start = glued.unwrap_or(l.x + l.w) + 0.008;
     let rest = &found.line.words[found.next..];
-    let end = rest.iter().find(|w| !fold(&w.text).is_empty()).map(|w| w.area.x - 0.012).unwrap_or(0.96);
+    // The next printed word to the right, on this line or on another the
+    // reader made of the same row (a label in a second column).
+    let beside = lines
+        .iter()
+        .filter(|o| !std::ptr::eq(**o, found.line))
+        .flat_map(|o| o.words.iter())
+        .filter(|w| {
+            // Its middle within this row: the line under a tightly printed
+            // list overlaps it a little, but is not beside the label.
+            let middle = w.area.y + w.area.h / 2.0;
+            middle > row.y + row.h * 0.2 && middle < row.y + row.h * 0.8
+        });
+    let end = rest
+        .iter()
+        .chain(beside)
+        .filter(|w| !fold(&w.text).is_empty() && w.area.x > start)
+        .map(|w| w.area.x - 0.012)
+        .fold(0.96, f32::min);
+    // Some readers leave out the dots drawn after a label: it then ends its
+    // line. With other printed lines right above or under it, it is one of a
+    // list of labels, with no room to write between them, so the answer goes
+    // on its line. A heading over a box to write in has space around it.
+    let crowded = lines.iter().filter(|o| !std::ptr::eq(**o, found.line)).any(|o| {
+        let a = union(&o.words);
+        let gap = (a.y - (row.y + row.h)).max(row.y - (a.y + a.h));
+        gap < row.h * 0.8
+    });
+    let bare = rest.iter().all(|w| fold(&w.text).is_empty()) && crowded;
     // Written on the same line when the form leaves room there: a drawn
     // blank, or a colon after the label. A bare heading has its box below.
-    let inline = rest.iter().any(|w| is_blank(&w.text)) || found.words.iter().any(|w| w.text.trim_end().ends_with(':'));
+    let inline = glued.is_some()
+        || bare
+        || rest.iter().any(|w| is_blank(&w.text))
+        || found.words.iter().any(|w| w.text.trim_end().ends_with(':'));
     if inline && end - start >= 0.05 {
         // As high as the whole printed line, not just the label's words (an
         // accent or a "p" makes those taller or shorter), so every answer on
         // the page is written the same size.
-        let row = union(&found.line.words);
-        Area { x: start, y: row.y - row.h * 0.1, w: end - start, h: row.h * 1.2 }
+        Area {
+            x: start,
+            y: row.y - row.h * 0.1,
+            w: end - start,
+            h: row.h * 1.2,
+        }
     } else {
-        Area { x: l.x, y: l.y + l.h * 1.3, w: (0.96 - l.x).min(0.6), h: l.h * 1.2 }
+        Area {
+            x: l.x,
+            y: l.y + l.h * 1.3,
+            w: (0.96 - l.x).min(0.6),
+            h: l.h * 1.2,
+        }
     }
 }
 
@@ -177,7 +320,10 @@ mod tests {
             .split(' ')
             .map(|t| {
                 let w = 0.008 * t.chars().count() as f32;
-                let word = Word { text: t.into(), area: Area { x, y, w, h: 0.01 } };
+                let word = Word {
+                    text: t.into(),
+                    area: Area { x, y, w, h: 0.01 },
+                };
                 x += w + 0.006;
                 word
             })
@@ -188,7 +334,11 @@ mod tests {
     fn page() -> Vec<Line> {
         vec![
             line(0.30, 0.07, "Nom et prénom : ______________________"),
-            line(0.40, 0.07, "NPA / Localité : __________ Téléphone : __________"),
+            line(
+                0.40,
+                0.07,
+                "NPA / Localité : __________ Téléphone : __________",
+            ),
             line(0.60, 0.07, "☐6 mois (CHF 120.–) ☐12 mois (CHF 200.–)"),
             line(0.80, 0.07, "Remarques"),
         ]
@@ -197,19 +347,169 @@ mod tests {
     #[test]
     fn the_answer_goes_after_its_label_up_to_the_next_one() {
         let fields = vec![
-            Field { label: "Nom et prénom".into(), ..Default::default() },
-            Field { label: "NPA / Localité".into(), ..Default::default() },
-            Field { label: "Téléphone".into(), ..Default::default() },
+            Field {
+                label: "Nom et prénom".into(),
+                ..Default::default()
+            },
+            Field {
+                label: "NPA / Localité".into(),
+                ..Default::default()
+            },
+            Field {
+                label: "Téléphone".into(),
+                ..Default::default()
+            },
         ];
         let out = snap(&fields, &page());
         let name = out[0].area.unwrap();
-        assert!((name.y - 0.299).abs() < 0.002, "on the label's line: {name:?}");
+        assert!(
+            (name.y - 0.299).abs() < 0.002,
+            "on the label's line: {name:?}"
+        );
         // "Nom et prénom :" ends at 0.07 + 3 words and a colon.
-        assert!(name.x > 0.19 && name.x < 0.22, "just after the colon: {name:?}");
+        assert!(
+            name.x > 0.19 && name.x < 0.22,
+            "just after the colon: {name:?}"
+        );
         let npa = out[1].area.unwrap();
         let phone = out[2].area.unwrap();
-        assert!(npa.x + npa.w < phone.x, "NPA stops before Téléphone: {npa:?} {phone:?}");
+        assert!(
+            npa.x + npa.w < phone.x,
+            "NPA stops before Téléphone: {npa:?} {phone:?}"
+        );
         assert!((phone.y - npa.y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_label_read_together_with_its_dots_is_answered_on_its_line() {
+        // As Google's reader returns it: the last word and the dots as one.
+        let lines = vec![
+            line(0.30, 0.07, "Titulaire du compte.........................."),
+            line(0.32, 0.07, "Adresse du titulaire du compte :...................."),
+        ];
+        let fields = vec![
+            Field {
+                label: "Titulaire du compte".into(),
+                ..Default::default()
+            },
+            Field {
+                label: "Adresse du titulaire du compte".into(),
+                ..Default::default()
+            },
+        ];
+        let out = snap(&fields, &lines);
+        let holder = out[0].area.unwrap();
+        assert!((holder.y - 0.299).abs() < 0.002, "on its line: {holder:?}");
+        // "Titulaire du compte" is 19 letters and 2 gaps from 0.07.
+        assert!(
+            holder.x > 0.22 && holder.x < 0.24,
+            "where the letters end, over the dots: {holder:?}"
+        );
+        let address = out[1].area.unwrap();
+        assert!((address.y - 0.319).abs() < 0.002, "on its line: {address:?}");
+    }
+
+    #[test]
+    fn labels_read_without_their_dots_and_with_slips_are_answered_on_their_lines() {
+        // As Google's reader returned a letter: the dots left out, the next
+        // label right under each one, a letter misread here and there.
+        let lines = vec![
+            line(0.167, 0.03, "Titulaire du compte"),
+            line(0.180, 0.03, "Adresse du titųlaire du compte"),
+            line(0.193, 0.03, "Nom de 1'etablissement"),
+            line(0.206, 0.03, "Votre numero de telephone"),
+        ];
+        let fields: Vec<Field> = [
+            "Titulaire du compte",
+            "Adresse du titulaire du compte",
+            "Nom de l'établissement",
+            "Votre numéro de téléphone",
+        ]
+        .iter()
+        .map(|l| Field {
+            label: (*l).into(),
+            ..Default::default()
+        })
+        .collect();
+        let (out, found) = snapped(&fields, &lines);
+        assert_eq!(found, 4);
+        for (f, l) in out.iter().zip(&lines) {
+            let a = f.area.unwrap();
+            let printed = union(&l.words);
+            assert!((a.y - (printed.y - 0.001)).abs() < 0.002, "{}: on its line: {a:?}", f.label);
+            assert!(
+                (a.x - (printed.x + printed.w + 0.008)).abs() < 0.002,
+                "{}: right after it: {a:?}",
+                f.label
+            );
+        }
+    }
+
+    #[test]
+    fn a_taller_printed_line_does_not_get_a_bigger_answer() {
+        let mut lines = vec![
+            line(0.20, 0.03, "Nom :"),
+            line(0.22, 0.03, "Prenom :"),
+            line(0.24, 0.03, "Ville (localite) :"),
+        ];
+        // Brackets read taller than the letters around them.
+        lines[2].words[1].area.h = 0.016;
+        let fields: Vec<Field> = ["Nom", "Prénom", "Ville (localité)"]
+            .iter()
+            .map(|l| Field {
+                label: (*l).into(),
+                ..Default::default()
+            })
+            .collect();
+        let out = snap(&fields, &lines);
+        let h: Vec<f32> = out.iter().map(|f| f.area.unwrap().h).collect();
+        assert!(h.iter().all(|x| (x - h[0]).abs() < 1e-6), "{h:?}");
+        let city = out[2].area.unwrap();
+        assert!((city.y + city.h / 2.0 - 0.248).abs() < 0.002, "centred on its line: {city:?}");
+    }
+
+    #[test]
+    fn the_next_line_of_a_tight_list_is_not_taken_for_a_word_beside_the_label() {
+        // As read on a photographed letter: the line under it overlaps a little.
+        let word = |t: &str, x: f32, y: f32, w: f32, h: f32| Word {
+            text: t.into(),
+            area: Area { x, y, w, h },
+        };
+        let lines = vec![
+            Line {
+                words: vec![
+                    word("BIC", 0.014, 0.236, 0.029, 0.013),
+                    word("/SWIFT", 0.054, 0.237, 0.070, 0.013),
+                    word("Ou", 0.135, 0.239, 0.019, 0.013),
+                    word("RIB", 0.166, 0.238, 0.029, 0.011),
+                    word("Complet", 0.206, 0.236, 0.067, 0.017),
+                ],
+            },
+            Line {
+                words: vec![
+                    word("Votre", 0.015, 0.250, 0.048, 0.016),
+                    word("telephone", 0.175, 0.248, 0.088, 0.017),
+                    word("ou", 0.336, 0.248, 0.018, 0.015),
+                    word("professionnel", 0.367, 0.247, 0.128, 0.017),
+                ],
+            },
+        ];
+        let fields = vec![Field {
+            label: "BIC / SWIFT ou RIB complet".into(),
+            ..Default::default()
+        }];
+        let a = snap(&fields, &lines)[0].area.unwrap();
+        assert!(a.x > 0.27 && a.y < 0.24 && a.w > 0.5, "on its line, to the right edge: {a:?}");
+    }
+
+    #[test]
+    fn misread_letters_are_forgiven_only_in_long_words() {
+        assert!(close("1etablissement", "letablissement"));
+        assert!(close("titųlaire", "titulaire"));
+        assert!(close("adress", "adresse"));
+        assert!(!close("nom", "non"));
+        assert!(!close("compte", "comte s"));
+        assert!(!close("prenom", "renoms"));
     }
 
     #[test]
@@ -217,8 +517,14 @@ mod tests {
         let fields = vec![Field {
             label: "Durée".into(),
             choices: vec![
-                Choice { label: "6 mois (CHF 120.–)".into(), area: None },
-                Choice { label: "12 mois (CHF 200.–)".into(), area: None },
+                Choice {
+                    label: "6 mois (CHF 120.–)".into(),
+                    area: None,
+                },
+                Choice {
+                    label: "12 mois (CHF 200.–)".into(),
+                    area: None,
+                },
             ],
             ..Default::default()
         }];
@@ -232,24 +538,45 @@ mod tests {
 
     #[test]
     fn a_label_not_on_the_page_keeps_the_models_guess() {
-        let guess = Some(Area { x: 0.5, y: 0.5, w: 0.2, h: 0.02 });
-        let fields = vec![Field { label: "Numéro AVS".into(), area: guess, ..Default::default() }];
+        let guess = Some(Area {
+            x: 0.5,
+            y: 0.5,
+            w: 0.2,
+            h: 0.02,
+        });
+        let fields = vec![Field {
+            label: "Numéro AVS".into(),
+            area: guess,
+            ..Default::default()
+        }];
         assert_eq!(snap(&fields, &page())[0].area, guess);
     }
 
     #[test]
     fn a_label_alone_on_its_line_is_answered_under_it() {
-        let fields = vec![Field { label: "Remarques".into(), ..Default::default() }];
+        let fields = vec![Field {
+            label: "Remarques".into(),
+            ..Default::default()
+        }];
         let r = snap(&fields, &page())[0].area.unwrap();
         assert!(r.y > 0.81, "under the label: {r:?}");
     }
 
     #[test]
     fn a_repeated_label_is_matched_in_order() {
-        let lines = vec![line(0.2, 0.07, "Date : ________"), line(0.7, 0.07, "Date : ________")];
+        let lines = vec![
+            line(0.2, 0.07, "Date : ________"),
+            line(0.7, 0.07, "Date : ________"),
+        ];
         let fields = vec![
-            Field { label: "Date".into(), ..Default::default() },
-            Field { label: "Date".into(), ..Default::default() },
+            Field {
+                label: "Date".into(),
+                ..Default::default()
+            },
+            Field {
+                label: "Date".into(),
+                ..Default::default()
+            },
         ];
         let out = snap(&fields, &lines);
         assert!(out[0].area.unwrap().y < 0.3 && out[1].area.unwrap().y > 0.6);

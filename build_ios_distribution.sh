@@ -188,7 +188,7 @@ plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$PLIST_PATH"
 plutil -replace CFBundleDisplayName -string "scan2fil" "$PLIST_PATH"
 
 # Build Number — owned by ShipScreen (Version step), injected per build
-BUILD_NUMBER="2"
+BUILD_NUMBER="4"
 echo "   Version 1.0 ($BUILD_NUMBER)"
 
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$PLIST_PATH"

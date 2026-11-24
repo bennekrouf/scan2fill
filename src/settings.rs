@@ -21,6 +21,10 @@ pub struct Settings {
     /// Off iOS only; on iOS the id lives in the Keychain.
     #[serde(default)]
     pub device_id: String,
+    /// The person's signature as pen strokes (`signature.rs`); empty until
+    /// they draw one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signature: crate::signature::Strokes,
 }
 
 impl Default for Settings {
@@ -32,6 +36,7 @@ impl Default for Settings {
             region: default_region(),
             trial_used: false,
             device_id: String::new(),
+            signature: Vec::new(),
         }
     }
 }
@@ -55,10 +60,59 @@ fn default_region() -> String {
 /// files folder; elsewhere the usual data folder.
 fn path() -> PathBuf {
     #[cfg(target_os = "android")]
-    if let Some(files) = files_dir_beside(&std::env::temp_dir()) {
+    if let Some(files) = android_files_dir() {
         return files.join("scan2fil").join("settings.json");
     }
     usual_path()
+}
+
+/// The app's own files folder, which Android keeps until the app is
+/// uninstalled. Found from the cache folder when `TMPDIR` points there, else
+/// from the package name and the Android user the app runs as: Rust's
+/// `temp_dir()` is `/data/local/tmp` when `TMPDIR` is unset, which an app
+/// cannot write to, so the sign-in was never kept.
+#[cfg(target_os = "android")]
+fn android_files_dir() -> Option<PathBuf> {
+    if let Some(files) = files_dir_beside(&std::env::temp_dir()) {
+        return Some(files);
+    }
+    let cmdline = std::fs::read("/proc/self/cmdline").ok()?;
+    let package = String::from_utf8_lossy(cmdline.split(|b| *b == 0).next()?).into_owned();
+    // A service in its own process is named "package:service".
+    let package = package.split(':').next()?.trim().to_string();
+    if package.is_empty() || package.contains('/') {
+        return None;
+    }
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let uid: u32 = status
+        .lines()
+        .find_map(|l| l.strip_prefix("Uid:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(app_files_dir(&package, uid))
+}
+
+/// `/data/user/<n>/<package>/files`, where Android user n's apps run with
+/// uids from n × 100000.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn app_files_dir(package: &str, uid: u32) -> PathBuf {
+    PathBuf::from(format!("/data/user/{}/{package}/files", uid / 100_000))
+}
+
+/// Gives Rust's temporary folder, `/data/local/tmp` on Android when `TMPDIR`
+/// is unset, the app's cache folder instead: the photo for the text reader and
+/// the PDF to share are written there.
+pub fn prepare_temp_dir() {
+    #[cfg(target_os = "android")]
+    if files_dir_beside(&std::env::temp_dir()).is_none() {
+        if let Some(cache) = android_files_dir().and_then(|f| Some(f.parent()?.join("cache"))) {
+            let _ = std::fs::create_dir_all(&cache);
+            // Set once at start, before any other thread reads the environment.
+            std::env::set_var("TMPDIR", &cache);
+        }
+    }
 }
 
 /// Android gives apps no `HOME`, so this lands in the cache folder there,
@@ -121,7 +175,22 @@ mod tests {
     #[test]
     fn files_folder_sits_beside_the_cache() {
         let files = files_dir_beside(Path::new("/data/user/0/com.mayorana.scan2fil/cache"));
-        assert_eq!(files, Some(PathBuf::from("/data/user/0/com.mayorana.scan2fil/files")));
+        assert_eq!(
+            files,
+            Some(PathBuf::from("/data/user/0/com.mayorana.scan2fil/files"))
+        );
+    }
+
+    #[test]
+    fn files_folder_of_each_android_user() {
+        assert_eq!(
+            app_files_dir("com.mayorana.scan2fil", 10_123),
+            PathBuf::from("/data/user/0/com.mayorana.scan2fil/files")
+        );
+        assert_eq!(
+            app_files_dir("com.mayorana.scan2fil", 1_010_123),
+            PathBuf::from("/data/user/10/com.mayorana.scan2fil/files")
+        );
     }
 
     #[test]

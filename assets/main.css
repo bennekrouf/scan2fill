@@ -8,6 +8,18 @@
   --accent-text: #ffffff;
   --warn-bg: #fff4d6;
   --error: #c62828;
+  /* The question pages: soft page colours the text stays easy to read on,
+     and a stronger one of each for the progress and the Next button. */
+  --hue-0: #fde8dc; --hue-0-strong: #a3431b;
+  --hue-1: #e3f1df; --hue-1-strong: #336e2d;
+  --hue-2: #e1ebfa; --hue-2-strong: #2a5bae;
+  --hue-3: #f1e5f4; --hue-3-strong: #753a87;
+  --hue-4: #fbf0c6; --hue-4-strong: #755a00;
+  --hue-5: #daf0ec; --hue-5-strong: #196960;
+  --strong: var(--accent);
+  --on-strong: #ffffff;
+  --field: rgba(255, 255, 255, 0.75);
+  --step-muted: #55555a;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -19,6 +31,15 @@
     --accent: #4c8dff;
     --warn-bg: #3a3014;
     --error: #ff6b6b;
+    --hue-0: #3a2820; --hue-0-strong: #f2a580;
+    --hue-1: #233222; --hue-1-strong: #8fd086;
+    --hue-2: #1e293b; --hue-2-strong: #8fb5f6;
+    --hue-3: #312435; --hue-3-strong: #d6a0e5;
+    --hue-4: #352e17; --hue-4-strong: #e9c95e;
+    --hue-5: #1a312e; --hue-5-strong: #72d2c6;
+    --on-strong: #111113;
+    --field: rgba(0, 0, 0, 0.28);
+    --step-muted: #c4c4ca;
   }
 }
 * { box-sizing: border-box; }
@@ -28,6 +49,7 @@ html, body {
   color: var(--text);
   font: 16px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
+  transition: background-color 0.35s ease;
 }
 .app {
   padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));
@@ -53,7 +75,7 @@ button { font: inherit; }
   font-weight: 600; font-size: 17px;
 }
 .big.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-label.big:has(input:disabled) { opacity: 0.45; }
+label.big:has(input:disabled), button.big:disabled { opacity: 0.45; }
 /* The file input lies over its button, invisible: iOS opens no picker for a
    display:none input. */
 label.big { position: relative; overflow: hidden; }
@@ -74,20 +96,13 @@ label.big input[type=file] { position: absolute; inset: 0; width: 100%; height: 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; }
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
-.q-head { display: flex; justify-content: space-between; gap: 8px; }
-.label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-.tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
-.question { font-weight: 600; margin: 4px 0 8px; }
-.answer, .summary {
-  width: 100%; font: inherit; color: var(--text); background: var(--bg);
-  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
-}
-.summary { font-family: ui-monospace, Menlo, monospace; font-size: 14px; resize: vertical; }
-.chip {
-  margin-top: 8px; background: none; border: 1px dashed var(--accent);
-  color: var(--accent); border-radius: 999px; padding: 4px 12px; font-size: 14px;
-}
 .radio { display: flex; gap: 10px; align-items: center; padding: 8px 0; }
+.radio.off { opacity: 0.55; }
+.bar-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.region-flag {
+  background: none; border: 0; padding: 4px 6px; margin: 0;
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand img { width: 32px; height: 32px; border-radius: 8px; }
 .note { color: var(--muted); margin: -8px 0 12px; }
@@ -107,6 +122,130 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* The filled form: the page photo with the answers on it. */
 .filled { margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
 .filled svg { display: block; width: 100%; height: auto; }
-.choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
-.chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.link { background: none; border: 0; color: var(--accent); font-size: 16px; padding: 4px 0; margin-bottom: 4px; }
+
+/* The questions, one page each. The page colour is the whole screen's,
+   header included, and changes with each question. */
+html:has(.hue-0) { --bg: var(--hue-0); --strong: var(--hue-0-strong); }
+html:has(.hue-1) { --bg: var(--hue-1); --strong: var(--hue-1-strong); }
+html:has(.hue-2) { --bg: var(--hue-2); --strong: var(--hue-2-strong); }
+html:has(.hue-3) { --bg: var(--hue-3); --strong: var(--hue-3-strong); }
+html:has(.hue-4) { --bg: var(--hue-4); --strong: var(--hue-4-strong); }
+html:has(.hue-5) { --bg: var(--hue-5); --strong: var(--hue-5-strong); }
+.step {
+  min-height: calc(100vh - 140px);
+  display: flex; flex-direction: column;
+  padding-top: 8px;
+  animation: step-in 0.32s ease-out;
+}
+@keyframes step-in { from { opacity: 0; transform: translateY(14px); } }
+@media (prefers-reduced-motion: reduce) {
+  .step { animation: none; }
+  body { transition: none; }
+}
+.progress { height: 6px; border-radius: 3px; background: var(--field); overflow: hidden; margin-bottom: 20px; }
+.progress-fill { height: 100%; background: var(--strong); border-radius: 3px; transition: width 0.3s ease; }
+.step-count {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--step-muted);
+}
+.step-tag { font-weight: 500; font-size: 12px; border: 1px solid currentColor; border-radius: 8px; padding: 0 6px; }
+.step-question { font-size: 26px; line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 10px; overflow-wrap: anywhere; }
+.step-label { color: var(--step-muted); margin: 0 0 6px; }
+.step-text { font-size: 17px; margin: 10px 0; }
+.step dl { margin: 12px 0; }
+.step dt { color: var(--step-muted); }
+.step-choices { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 4px; }
+.step-choice {
+  text-align: left; padding: 14px 16px; border-radius: 14px;
+  border: 2px solid transparent; background: var(--field); color: var(--text); font-size: 17px;
+}
+.step-choice.on { border-color: var(--strong); font-weight: 600; }
+.step-choice.on::after { content: " ✓"; color: var(--strong); }
+.step-answer {
+  width: 100%; margin-top: 18px; padding: 14px 16px;
+  font: inherit; font-size: 18px; color: var(--text);
+  background: var(--field); border: 2px solid transparent; border-radius: 14px;
+}
+.step-answer:focus { outline: none; border-color: var(--strong); }
+.step-answer::placeholder { color: var(--step-muted); opacity: 0.8; }
+.step-suggest {
+  align-self: flex-start; margin-top: 10px; padding: 6px 14px;
+  background: none; border: 1px dashed var(--strong); color: var(--strong);
+  border-radius: 999px; font-size: 15px;
+}
+.step-nav {
+  margin-top: auto; padding-top: 28px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+}
+.step-back { background: none; border: 0; color: var(--text); padding: 14px 4px; font-size: 17px; }
+.step-next {
+  padding: 14px 26px; border: 0; border-radius: 999px;
+  background: var(--strong); color: var(--on-strong); font-size: 17px; font-weight: 600;
+}
+.step-next:active, .step-choice:active { transform: scale(0.97); }
+
+/* The answers at a glance, each a tap from its page. */
+.answers { list-style: none; padding: 0; margin: 12px 0; }
+.answer-row {
+  display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
+  margin: 0 0 8px; padding: 12px 14px 12px 18px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  position: relative; overflow: hidden;
+}
+.answer-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; }
+.hue-dot-0::before { background: var(--hue-0-strong); }
+.hue-dot-1::before { background: var(--hue-1-strong); }
+.hue-dot-2::before { background: var(--hue-2-strong); }
+.hue-dot-3::before { background: var(--hue-3-strong); }
+.hue-dot-4::before { background: var(--hue-4-strong); }
+.hue-dot-5::before { background: var(--hue-5-strong); }
+.answer-q { font-size: 13px; color: var(--muted); }
+.answer-v { font-size: 17px; overflow-wrap: anywhere; }
+.answer-v.gap { color: var(--error); font-size: 15px; }
+.answer-v.skipped { color: var(--muted); font-size: 15px; }
+
+/* Signing: a sheet of paper to sign on, always white, in pen blue. */
+.sig-pad-wrap { position: relative; margin: 16px 0 8px; }
+.sig-pad {
+  display: block; width: 100%; aspect-ratio: 5 / 2;
+  background: #fff; color: #1a3399; border: 1px solid var(--line); border-radius: 14px;
+  touch-action: none; cursor: crosshair;
+}
+.sig-pad-line {
+  position: absolute; left: 8%; right: 8%; bottom: 22%;
+  border-bottom: 1.5px dashed #b9b6ae; pointer-events: none;
+}
+.sig-pad-clear {
+  position: absolute; top: 8px; right: 8px; padding: 4px 12px;
+  background: #f1efea; color: #1c1c1e; border: 0; border-radius: 999px; font-size: 14px;
+}
+.sig-saved {
+  position: relative; display: block; width: 100%; margin: 16px 0 8px; padding: 14px 18px;
+  background: #fff; color: #1a3399; border: 2px solid var(--line); border-radius: 14px;
+}
+.sig-saved.on { border-color: var(--strong); }
+.sig-ink svg { display: block; width: 100%; max-height: 120px; }
+.sig-check {
+  position: absolute; top: 8px; right: 10px; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--strong); color: var(--on-strong); font-weight: 700;
+}
+.answer-sig { display: block; max-width: 180px; margin-top: 4px; padding: 4px 8px; background: #fff; border-radius: 8px; color: #1a3399; }
+.answer-sig svg { display: block; width: 100%; max-height: 48px; }
+.row { display: flex; gap: 10px; }
+.row .big { margin: 6px 0; }
+
+/* About: the legal pages, one per row. */
+.about-link {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  background: none; border: 0; border-top: 1px solid var(--line);
+  color: inherit; font-size: 16px; text-align: left; padding: 12px 0;
+}
+.about .muted.small { margin-bottom: 4px; }
+
+/* Review: the page as it will be read. */
+.review h2 { margin: 8px 0 4px; font-size: 22px; }
+.review-page {
+  display: block; width: 100%; height: auto; margin: 12px 0;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff;
+}

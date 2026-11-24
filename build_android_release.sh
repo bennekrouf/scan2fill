@@ -110,7 +110,7 @@ NEW_PACKAGE="com.mayorana.scan2fil"
 
 # Version info — owned by ShipScreen (Version step), injected per build.
 # Mirrored into Dioxus.toml so the project's own config stays in step.
-V_CODE=1
+V_CODE=9
 V_NAME="1.0"
 sed -i '' "s/version_code *= *[0-9]*/version_code = $V_CODE/g" Dioxus.toml
 sed -i '' "s/version_name *= *\".*\"/version_name = \"$V_NAME\"/g" Dioxus.toml

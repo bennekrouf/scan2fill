@@ -42,8 +42,8 @@
     true
   ],
   "version": "1.0",
-  "ios_build_number": 2,
-  "android_version_code": 2,
+  "ios_build_number": 5,
+  "android_version_code": 9,
   "auto_increment_build": true,
   "provisioning_profile": "/Users/mb/Library/MobileDevice/Provisioning Profiles/scan2fil-2026.mobileprovision",
   "ios_artifact_path": "",
@@ -52,7 +52,36 @@
   "support_url": "",
   "exempt_encryption": true,
   "play_track": "internal",
-  "play_release_status": "draft",
-  "releases": [],
+  "play_release_status": "completed",
+  "releases": [
+    {
+      "at": "2026-11-22 19:47",
+      "platform": "android",
+      "version": "1.0",
+      "build": 8,
+      "action": "Released to internal (completed)"
+    },
+    {
+      "at": "2026-11-22 18:13",
+      "platform": "android",
+      "version": "1.0",
+      "build": 7,
+      "action": "Released to internal (completed)"
+    },
+    {
+      "at": "2026-11-22 16:40",
+      "platform": "android",
+      "version": "1.0",
+      "build": 6,
+      "action": "Released to internal (draft)"
+    },
+    {
+      "at": "2026-11-22 15:01",
+      "platform": "android",
+      "version": "1.0",
+      "build": 5,
+      "action": "Released to internal (draft)"
+    }
+  ],
   "android_key_alias": ""
 }

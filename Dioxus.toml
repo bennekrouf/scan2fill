@@ -17,3 +17,6 @@ NSCameraUsageDescription = "scan2fil photographs the document you want to fill i
 NSPhotoLibraryUsageDescription = "scan2fil reads the photo of the document you want to fill in."
 
 [android]
+# Google Play asks for the latest API level.
+target_sdk = 36
+compile_sdk = 36

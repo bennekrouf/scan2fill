@@ -48,6 +48,33 @@ class Scan2filPlatform(private val activity: Activity) {
         return ""
     }
 
+    /** Opens a web page, such as the privacy policy, in a Custom Tab (the browser if none). */
+    fun viewUrl(url: String): String {
+        activity.runOnUiThread {
+            try {
+                CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(url))
+            } catch (e: Exception) {
+                // No browser at all: nothing to open the page with.
+            }
+        }
+        return ""
+    }
+
+    /** Opens Google's document scanner; see [Scan]. */
+    fun startScan(): String {
+        Scan.start(activity)
+        return ""
+    }
+
+    /** "" while the scanner is open; see [Scan.take]. */
+    fun scanResult(): String = Scan.take()
+
+    /** Starts reading the text printed on the JPEG at [path]; see [TextReader]. */
+    fun startReadText(path: String): String = TextReader.start(path)
+
+    /** "" while the text is still being read; see [TextReader.take]. */
+    fun readTextResult(): String = TextReader.take()
+
     /** "" while the person is still signing in; see [SignIn.result]. */
     fun signInResult(): String = SignIn.take(activity.application)
 }

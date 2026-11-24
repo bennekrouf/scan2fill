@@ -32,6 +32,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Google's document scanner opens from here and hands its page back
+             here: the app's own activity belongs to Dioxus. -->
+        <activity
+            android:name="com.mayorana.scan2fil.platform.ScanActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- The camera app writes the photo to a file it is handed through
              this provider; the WebView's file chooser looks for it under
              <package>.fileprovider. -->

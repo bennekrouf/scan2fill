@@ -16,25 +16,64 @@ pub const GATEWAY: &str = "https://gateway.api0.ai/v1";
 const CLIENT_APP: &str = "scan2fil";
 
 /// A whole form's questions fit well inside this; a reply cut here is reported.
-const ANSWER_TOKENS: u32 = 4096;
+const ANSWER_TOKENS: u32 = 8192;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
 
-/// An api0 region. Only those whose model reads images are offered.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// An api0 region, as api0 lists it (`GET {GATEWAY}/regions`): which ones
+/// are open, and the flag and name to show for each. api0 decides; the app
+/// only offers what it lists as available.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 pub struct Region {
-    pub id: &'static str,
-    pub display: &'static str,
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub flag: String,
+    #[serde(default)]
+    pub available: bool,
 }
 
-/// China's model (DeepSeek) reads no images, so it is not offered.
-pub const REGIONS: &[Region] = &[
-    Region { id: "europe", display: "🇪🇺 Europe" },
-    Region { id: "usa", display: "🇺🇸 United States" },
-];
+/// What is offered until api0 has answered, or when it cannot be reached.
+pub fn known_regions() -> Vec<Region> {
+    vec![Region {
+        id: "europe".into(),
+        label: "Europe".into(),
+        flag: "🇪🇺".into(),
+        available: true,
+    }]
+}
 
-pub fn region(id: &str) -> &'static Region {
-    REGIONS.iter().find(|r| r.id == id).unwrap_or(&REGIONS[0])
+/// The regions api0 lists now. Needs no licence.
+pub async fn fetch_regions() -> Result<Vec<Region>, String> {
+    #[derive(Deserialize)]
+    struct List {
+        regions: Vec<Region>,
+    }
+    let list: List = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(format!("{GATEWAY}/regions"))
+        .header("X-Client-App", CLIENT_APP)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    if list.regions.iter().any(|r| r.available) {
+        Ok(list.regions)
+    } else {
+        Err("api0 lists no open region".into())
+    }
+}
+
+/// The region a reading goes to: the saved one while api0 keeps it open,
+/// else the first one open.
+pub fn chosen<'a>(regions: &'a [Region], saved: &str) -> Option<&'a Region> {
+    let open = || regions.iter().filter(|r| r.available);
+    open().find(|r| r.id == saved).or_else(|| open().next())
 }
 
 /// What the document is, as read from the photo.
@@ -70,7 +109,8 @@ pub struct Field {
     /// When the field can be left empty, e.g. "only if you live abroad".
     #[serde(default)]
     pub only_if: String,
-    /// A value the document itself already shows (the addressee's name, say).
+    /// A standard example answer, as someone in Paris would give it ("Jean
+    /// Dupont", "12 rue de Rivoli, 75001 Paris"), never the document's own data.
     #[serde(default)]
     pub suggested: String,
     /// Where the answer is written on the page, if the model could tell.
@@ -79,6 +119,9 @@ pub struct Field {
     /// The tick boxes, when the field is a choice between printed options.
     #[serde(default)]
     pub choices: Vec<Choice>,
+    /// The reader signs here rather than writes.
+    #[serde(default)]
+    pub signature: bool,
 }
 
 /// One printed option of a choice field, and where its tick box is.
@@ -107,16 +150,29 @@ impl Area {
     pub fn from_numbers(v: &[f64]) -> Option<Area> {
         let [x, y, w, h] = <[f64; 4]>::try_from(v).ok()?;
         let max = x.max(y).max(w).max(h);
-        let scale = if max <= 1.0 { 1.0 } else if max <= 1000.0 { 1000.0 } else { return None };
+        let scale = if max <= 1.0 {
+            1.0
+        } else if max <= 1000.0 {
+            1000.0
+        } else {
+            return None;
+        };
         let (x, y, w, h) = (x / scale, y / scale, w / scale, h / scale);
         let fits = x >= 0.0 && y >= 0.0 && w > 0.0 && h > 0.0 && x + w <= 1.02 && y + h <= 1.02;
-        fits.then_some(Area { x: x as f32, y: y as f32, w: w as f32, h: h as f32 })
+        fits.then_some(Area {
+            x: x as f32,
+            y: y as f32,
+            w: w as f32,
+            h: h as f32,
+        })
     }
 }
 
 fn lenient_area<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Area>, D::Error> {
     let v = Value::deserialize(d)?;
-    let numbers: Option<Vec<f64>> = v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect());
+    let numbers: Option<Vec<f64>> = v
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect());
     Ok(numbers.and_then(|n| Area::from_numbers(&n)))
 }
 
@@ -142,15 +198,16 @@ Rules:
 - "label" is the field's label as printed; "question" is a short, plain question to the reader.
 - "hint": the expected format or an example (e.g. an IBAN's shape), or "".
 - "required": false when the document says a field is optional or conditional; then "only_if" says when it is needed (e.g. "only if you live abroad").
-- "suggested": a value the document itself already shows for this field (for example the addressee's name and address printed on the letter); otherwise "". Never invent personal data.
+- "suggested": a standard example answer for this field, as a person living in Paris, France would give it, in the format the field expects: e.g. name "Jean Dupont", first name "Jean", address "12 rue de Rivoli, 75001 Paris", city "Paris", postcode "75001", country "France", phone "06 12 34 56 78", email "jean.dupont@exemple.fr", date of birth "15/03/1985", place of birth "Paris", nationality "française", IBAN "FR76 3000 6000 0112 3456 7890 189". Never copy a name, address or other personal detail printed on the document, such as the addressee's. "" for choice fields, signatures, and fields with no sensible example (a reference only the sender knows, say).
 - "document": what the document is ("title"), who sent it ("sender"), any reference or file number ("reference"), the deadline to reply as printed ("deadline"), how to send it back ("return_by": postal address or email as printed), and a one-sentence "summary" of what is asked and why.
 - "box": where the reader's answer is written on the page, as [x, y, width, height] in fractions of the photo's width and height (0 to 1), from the photo's top-left corner. Cover only the blank line, empty box or space left for the answer, not the printed label. null when you cannot tell.
 - "choices": when the field is a set of printed options to tick or circle, one entry per option: {"label": the option as printed, "box": [x, y, width, height] of its tick box, as above}; the question then asks which one applies. [] otherwise.
+- "signature": true when the reader signs there (a signature line or box), with "box" covering the space to sign in; false otherwise.
 - "notes": other things the reader must do or attach, each one short (e.g. documents needed in a special case). [] when none.
 - If the photo shows no document to fill in, return "fields": [] and say so in "summary".
 
 Reply with one JSON object and nothing else, of this shape:
-{"language": "fr", "document": {"title": "", "sender": "", "reference": "", "deadline": "", "return_by": "", "summary": ""}, "fields": [{"label": "", "question": "", "hint": "", "required": true, "only_if": "", "suggested": "", "box": [0.1, 0.2, 0.5, 0.03], "choices": []}], "notes": []}"#;
+{"language": "fr", "document": {"title": "", "sender": "", "reference": "", "deadline": "", "return_by": "", "summary": ""}, "fields": [{"label": "", "question": "", "hint": "", "required": true, "only_if": "", "suggested": "", "box": [0.1, 0.2, 0.5, 0.03], "choices": [], "signature": false}], "notes": []}"#;
 
 /// Who pays for a read: the signed-in person's licence, or the one free try
 /// this phone gets (`/v1/trial/chat/completions`, once per device).
@@ -169,7 +226,10 @@ pub struct ReadError {
 
 impl From<String> for ReadError {
     fn from(message: String) -> Self {
-        ReadError { message, trial_used: false }
+        ReadError {
+            message,
+            trial_used: false,
+        }
     }
 }
 
@@ -215,25 +275,33 @@ pub async fn read_document(payer: &Payer, region: &str, jpeg: &[u8]) -> Result<R
     let resp = request
         .header("X-Client-App", CLIENT_APP)
         .header("X-Task", "text")
+        .header("X-Feature", "read_document")
         .json(&body)
         .send()
         .await
         .map_err(|e| {
             if e.is_timeout() {
-                "api0 took too long to answer. Try again.".to_string()
+                crate::i18n::msg("api0 took too long to answer. Try again.", "api0 a mis trop de temps à répondre. Réessayez.")
             } else {
-                format!("api0 is unreachable. Check your connection. ({e})")
+                format!("{} ({e})", crate::i18n::msg("api0 is unreachable. Check your connection.", "api0 est injoignable. Vérifiez votre connexion."))
             }
         })?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(refused(status.as_u16(), &text, matches!(payer, Payer::Trial { .. })));
+        return Err(refused(
+            status.as_u16(),
+            &text,
+            matches!(payer, Payer::Trial { .. }),
+        ));
     }
 
-    let v: Value = serde_json::from_str(&text).map_err(|e| format!("api0 sent invalid JSON: {e}"))?;
+    let v: Value =
+        serde_json::from_str(&text).map_err(|e| format!("api0 sent invalid JSON: {e}"))?;
     if v["choices"][0]["finish_reason"] == "length" {
-        return Err("The answer was cut off: the document has too many fields for one read.".into());
+        return Err(
+            crate::i18n::msg("The answer was cut off before the end. Read the page again: a second read usually completes.", "La réponse a été coupée avant la fin. Relisez la page : une deuxième lecture va en général jusqu'au bout.").into(),
+        );
     }
     let content = v["choices"][0]["message"]["content"]
         .as_str()
@@ -250,12 +318,15 @@ fn refused(status: u16, body: &str, trial: bool) -> ReadError {
         .unwrap_or_else(|| body.chars().take(300).collect());
     if trial {
         let used = v["error"]["code"] == "trial_used";
-        return ReadError { message, trial_used: used };
+        return ReadError {
+            message,
+            trial_used: used,
+        };
     }
     let message = match status {
-        401 | 403 => format!("api0 did not accept your licence. Sign in again. {message}"),
-        402 => format!("No AI credits left this month. {message}"),
-        413 => "The photo is too large to send.".into(),
+        401 | 403 => format!("{} {message}", crate::i18n::msg("api0 did not accept your licence. Sign in again.", "api0 n'a pas accepté votre licence. Reconnectez-vous.")),
+        402 => format!("{} {message}", crate::i18n::msg("No AI credits left this month.", "Plus de crédits IA ce mois-ci.")),
+        413 => crate::i18n::msg("The photo is too large to send.", "La photo est trop lourde pour être envoyée."),
         _ => format!("api0 returned {status}: {message}"),
     };
     message.into()
@@ -269,7 +340,8 @@ pub fn parse_reading(raw: &str) -> Result<Reading, String> {
         .or_else(|| t.strip_prefix("```"))
         .map(|s| s.trim().trim_end_matches("```").trim())
         .unwrap_or(t);
-    serde_json::from_str(body).map_err(|e| format!("The model's answer was not the expected JSON ({e})."))
+    serde_json::from_str(body)
+        .map_err(|e| format!("The model's answer was not the expected JSON ({e})."))
 }
 
 #[cfg(test)]
@@ -308,8 +380,16 @@ mod tests {
     }
 
     #[test]
-    fn unknown_region_falls_back_to_europe() {
-        assert_eq!(region("china").id, "europe");
-        assert_eq!(region("usa").id, "usa");
+    fn the_saved_region_is_used_only_while_it_is_open() {
+        let list: Vec<Region> = serde_json::from_str(
+            r#"[{"id":"europe","label":"Europe","flag":"🇪🇺","available":true},
+                {"id":"china","label":"China","flag":"🇨🇳","available":true},
+                {"id":"usa","label":"United States","flag":"🇺🇸","available":false}]"#,
+        )
+        .unwrap();
+        assert_eq!(chosen(&list, "china").unwrap().id, "china");
+        assert_eq!(chosen(&list, "usa").unwrap().id, "europe", "closed");
+        assert_eq!(chosen(&list, "mars").unwrap().id, "europe");
+        assert_eq!(chosen(&[], "europe"), None);
     }
 }

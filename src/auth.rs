@@ -54,7 +54,9 @@ impl Provider {
         match self {
             // Google's iOS clients redirect to the client id reversed.
             Provider::Google => {
-                let id = self.client_id().trim_end_matches(".apps.googleusercontent.com");
+                let id = self
+                    .client_id()
+                    .trim_end_matches(".apps.googleusercontent.com");
                 let scheme = format!("com.googleusercontent.apps.{id}");
                 let uri = format!("{scheme}:/oauth2redirect");
                 (scheme, uri)
@@ -105,7 +107,9 @@ fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -149,7 +153,11 @@ fn decode(s: &str) -> String {
 /// Signs in with `provider` and returns the account and its licence.
 pub async fn sign_in(provider: Provider) -> Result<Account, String> {
     if provider.client_id().is_empty() {
-        return Err(format!("{} sign-in is not set up in this build yet.", provider.label()));
+        return Err(if crate::i18n::french_now() {
+            format!("La connexion {} n'est pas encore prête dans cette version.", provider.label())
+        } else {
+            format!("{} sign-in is not set up in this build yet.", provider.label())
+        });
     }
     let verifier = random_token(48)?;
     let nonce = random_token(24)?;
@@ -174,14 +182,21 @@ pub async fn sign_in(provider: Provider) -> Result<Account, String> {
     let callback = crate::sheet::open(&url, &scheme).await?;
     if let Some(err) = query_param(&callback, "error") {
         let detail = query_param(&callback, "error_description").unwrap_or_default();
-        return Err(format!("{} refused the sign-in: {err} {detail}", provider.label()).trim().to_string());
+        return Err(
+            format!("{} refused the sign-in: {err} {detail}", provider.label())
+                .trim()
+                .to_string(),
+        );
     }
     if query_param(&callback, "state").as_deref() != Some(state.as_str()) {
-        return Err("The sign-in answer did not match this request. Try again.".into());
+        return Err(crate::i18n::msg("The sign-in answer did not match this request. Try again.", "La réponse de connexion ne correspond pas à cette demande. Réessayez."));
     }
     let code = query_param(&callback, "code").ok_or("The sign-in returned no code.")?;
 
-    let client = reqwest::Client::builder().timeout(TIMEOUT).build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())?;
     let mut form = vec![
         ("grant_type", "authorization_code".to_string()),
         ("code", code),
@@ -201,10 +216,18 @@ pub async fn sign_in(provider: Provider) -> Result<Account, String> {
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or_default();
     if !status.is_success() {
-        let why = body["error_description"].as_str().or(body["error"].as_str()).unwrap_or("");
-        return Err(format!("{} refused the sign-in ({status}). {why}", provider.label()));
+        let why = body["error_description"]
+            .as_str()
+            .or(body["error"].as_str())
+            .unwrap_or("");
+        return Err(format!(
+            "{} refused the sign-in ({status}). {why}",
+            provider.label()
+        ));
     }
-    let id_token = body["id_token"].as_str().ok_or("The sign-in returned no identity.")?;
+    let id_token = body["id_token"]
+        .as_str()
+        .ok_or("The sign-in returned no identity.")?;
 
     // api0: id_token → session → licence.
     let resp = client
@@ -237,9 +260,13 @@ pub async fn sign_in(provider: Provider) -> Result<Account, String> {
     let licence = sub["licence"]
         .as_str()
         .filter(|l| !l.is_empty())
-        .ok_or("Your account has no licence yet. Try again in a minute.")?
+        .ok_or_else(|| crate::i18n::msg("Your account has no licence yet. Try again in a minute.", "Votre compte n'a pas encore de licence. Réessayez dans une minute."))?
         .to_string();
-    Ok(Account { email, licence, credits_left: sub["credits_left"].as_i64() })
+    Ok(Account {
+        email,
+        licence,
+        credits_left: sub["credits_left"].as_i64(),
+    })
 }
 
 fn api0_error(body: &Value, status: u16) -> String {
@@ -248,7 +275,9 @@ fn api0_error(body: &Value, status: u16) -> String {
         .or(body["message"].as_str())
         .or(body["error"].as_str())
         .unwrap_or("");
-    format!("api0 refused the sign-in ({status}). {message}").trim().to_string()
+    format!("api0 refused the sign-in ({status}). {message}")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]

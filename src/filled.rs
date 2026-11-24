@@ -6,6 +6,7 @@
 
 use crate::api0::{Area, Field};
 use crate::photo::Page;
+use crate::signature::{self, Strokes};
 use base64::Engine;
 
 /// Answer ink: a dark blue, like a pen.
@@ -21,10 +22,13 @@ pub struct Mark {
     pub text: String,
     /// A tick in an option's box rather than written text.
     pub tick: bool,
+    /// The signature, signed in the box, rather than text; empty otherwise.
+    pub strokes: Strokes,
 }
 
-/// What goes on the page, and how many answers had nowhere to go.
-pub fn marks(fields: &[Field], answers: &[String]) -> (Vec<Mark>, usize) {
+/// What goes on the page, and how many answers had nowhere to go. A field
+/// answered [`signature::SIGNED`] gets `signature`, the person's own.
+pub fn marks(fields: &[Field], answers: &[String], signature: &Strokes) -> (Vec<Mark>, usize) {
     let mut out = Vec::new();
     let mut unplaced = 0;
     for (i, f) in fields.iter().enumerate() {
@@ -32,10 +36,31 @@ pub fn marks(fields: &[Field], answers: &[String]) -> (Vec<Mark>, usize) {
         if answer.is_empty() {
             continue;
         }
-        if let Some(area) = chosen(f, answer) {
-            out.push(Mark { area, text: "X".into(), tick: true });
+        if answer == signature::SIGNED {
+            // Never the word itself on the page: the signature, or nothing.
+            match f.area {
+                Some(area) if !signature.is_empty() => out.push(Mark {
+                    area,
+                    text: String::new(),
+                    tick: false,
+                    strokes: signature.clone(),
+                }),
+                _ => unplaced += 1,
+            }
+        } else if let Some(area) = chosen(f, answer) {
+            out.push(Mark {
+                area,
+                text: "X".into(),
+                tick: true,
+                strokes: Vec::new(),
+            });
         } else if let Some(area) = f.area {
-            out.push(Mark { area, text: answer.to_string(), tick: false });
+            out.push(Mark {
+                area,
+                text: answer.to_string(),
+                tick: false,
+                strokes: Vec::new(),
+            });
         } else {
             unplaced += 1;
         }
@@ -49,7 +74,11 @@ fn chosen(f: &Field, answer: &str) -> Option<Area> {
     f.choices
         .iter()
         .find(|c| !c.label.trim().is_empty() && c.label.trim().to_lowercase() == a)
-        .or_else(|| f.choices.iter().find(|c| !c.label.trim().is_empty() && a.contains(&c.label.trim().to_lowercase())))
+        .or_else(|| {
+            f.choices
+                .iter()
+                .find(|c| !c.label.trim().is_empty() && a.contains(&c.label.trim().to_lowercase()))
+        })
         .and_then(|c| c.area)
 }
 
@@ -59,7 +88,11 @@ fn place(m: &Mark, w: f32, h: f32) -> (f32, f32, f32) {
     let (bx, by, bw, bh) = (m.area.x * w, m.area.y * h, m.area.w * w, m.area.h * h);
     if m.tick {
         let size = (bh.min(bw) * 1.1).clamp(w * 0.012, w * 0.04);
-        return (bx + (bw - size * 0.6) / 2.0, by + (bh + size * 0.7) / 2.0, size);
+        return (
+            bx + (bw - size * 0.6) / 2.0,
+            by + (bh + size * 0.7) / 2.0,
+            size,
+        );
     }
     // As tall as the blank allows, within a readable range, then narrowed
     // until the text fits its width (Helvetica averages about half an em).
@@ -68,7 +101,24 @@ fn place(m: &Mark, w: f32, h: f32) -> (f32, f32, f32) {
         .clamp(w * 0.014, w * 0.026)
         .min((bw - w * 0.004).max(w * 0.01) / (0.52 * chars))
         .max(w * 0.009);
-    (bx + w * 0.004, by + bh - (bh - size * 0.75).max(0.0) * 0.35 - size * 0.12, size)
+    (
+        bx + w * 0.004,
+        by + bh - (bh - size * 0.75).max(0.0) * 0.35 - size * 0.12,
+        size,
+    )
+}
+
+/// Where to sign `m` on a page `w` by `h`: the strokes' offset and scale.
+/// The signature sits on the box's bottom edge, the line signed on, from its
+/// left, within its width, and may rise a little above a thin box as a
+/// hand-written one would: within about one row of print, so it stays off
+/// the line above and the fields beside it.
+fn sign_at(m: &Mark, w: f32, h: f32) -> Option<(f32, f32, f32)> {
+    let (sx, sy, sw, sh) = signature::bounds(&m.strokes)?;
+    let (bx, by, bw, bh) = (m.area.x * w, m.area.y * h, m.area.w * w, m.area.h * h);
+    let room = (bh * 1.4).min(w * 0.035).max(bh.min(w * 0.035));
+    let k = (bw / sw).min(room / sh);
+    Some((bx - sx * k, by + bh - (sy + sh) * k, k))
 }
 
 /// The filled page as an SVG for the screen.
@@ -79,6 +129,14 @@ pub fn svg(page: &Page, marks: &[Mark]) -> String {
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="100%"><image href="data:image/jpeg;base64,{img}" x="0" y="0" width="{w}" height="{h}"/>"#
     );
     for m in marks {
+        if let Some((dx, dy, k)) = sign_at(m, w, h) {
+            s.push_str(&format!(
+                r#"<path d="{}" fill="none" stroke="{INK_HEX}" stroke-width="{:.2}" stroke-linecap="round" stroke-linejoin="round"/>"#,
+                signature::path(&m.strokes, dx, dy, k),
+                signature::pen(k)
+            ));
+            continue;
+        }
         let (x, y, size) = place(m, w, h);
         let weight = if m.tick { "700" } else { "400" };
         s.push_str(&format!(
@@ -91,7 +149,10 @@ pub fn svg(page: &Page, marks: &[Mark]) -> String {
 }
 
 fn xml_escape(t: &str) -> String {
-    t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    t.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// The filled page as a one-page PDF: the photo, with the answers as text
@@ -103,9 +164,36 @@ pub fn pdf(page: &Page, marks: &[Mark]) -> Vec<u8> {
     let mut content = format!("q {pw:.2} 0 0 {ph:.2} 0 0 cm /Im0 Do Q\n").into_bytes();
     let (r, g, b) = INK;
     for m in marks {
+        if let Some((dx, dy, k)) = sign_at(m, pw, ph) {
+            content.extend_from_slice(
+                format!("q {r} {g} {b} RG {:.2} w 1 J 1 j\n", signature::pen(k)).as_bytes(),
+            );
+            for stroke in &m.strokes {
+                for (i, [x, y]) in stroke.iter().enumerate() {
+                    let op = if i == 0 { "m" } else { "l" };
+                    content.extend_from_slice(
+                        format!("{:.2} {:.2} {op}\n", dx + x * k, ph - (dy + y * k)).as_bytes(),
+                    );
+                }
+                if let [[x, y]] = stroke[..] {
+                    content.extend_from_slice(
+                        format!("{:.2} {:.2} l\n", dx + x * k + 0.01, ph - (dy + y * k)).as_bytes(),
+                    );
+                }
+                content.extend_from_slice(b"S\n");
+            }
+            content.extend_from_slice(b"Q\n");
+            continue;
+        }
         let (x, top, size) = place(m, pw, ph);
         let font = if m.tick { "F2" } else { "F1" };
-        content.extend_from_slice(format!("BT /{font} {size:.2} Tf {r} {g} {b} rg {x:.2} {:.2} Td (", ph - top).as_bytes());
+        content.extend_from_slice(
+            format!(
+                "BT /{font} {size:.2} Tf {r} {g} {b} rg {x:.2} {:.2} Td (",
+                ph - top
+            )
+            .as_bytes(),
+        );
         content.extend_from_slice(&pdf_text(&m.text));
         content.extend_from_slice(b") Tj ET\n");
     }
@@ -137,19 +225,33 @@ pub fn pdf(page: &Page, marks: &[Mark]) -> Vec<u8> {
     image.extend_from_slice(&page.jpeg);
     image.extend_from_slice(b"\nendstream");
     object(&mut out, &image);
-    object(&mut out, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-    object(&mut out, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    object(
+        &mut out,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    );
+    object(
+        &mut out,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    );
     let mut stream = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
     stream.extend_from_slice(&content);
     stream.extend_from_slice(b"\nendstream");
     object(&mut out, &stream);
 
     let xref = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    out.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes(),
+    );
     for o in &offsets {
         out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
     }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1).as_bytes());
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
     out
 }
 
@@ -181,13 +283,23 @@ fn pdf_text(t: &str) -> Vec<u8> {
 pub fn file_name(title: &str) -> String {
     let base: String = title
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
     let base: String = base.chars().take(60).collect();
-    if base.is_empty() { "Filled form.pdf".into() } else { format!("{base} - filled.pdf") }
+    if base.is_empty() {
+        "Filled form.pdf".into()
+    } else {
+        format!("{base} - filled.pdf")
+    }
 }
 
 #[cfg(test)]
@@ -202,50 +314,161 @@ mod tests {
     #[test]
     fn answers_go_in_their_box_ticks_in_the_chosen_option() {
         let fields = vec![
-            Field { label: "Nom".into(), area: area(0.2, 0.1, 0.5, 0.03), ..Default::default() },
+            Field {
+                label: "Nom".into(),
+                area: area(0.2, 0.1, 0.5, 0.03),
+                ..Default::default()
+            },
             Field {
                 label: "Véhicule".into(),
                 choices: vec![
-                    Choice { label: "à mon nom".into(), area: area(0.1, 0.5, 0.02, 0.015) },
-                    Choice { label: "en leasing".into(), area: area(0.5, 0.5, 0.02, 0.015) },
+                    Choice {
+                        label: "à mon nom".into(),
+                        area: area(0.1, 0.5, 0.02, 0.015),
+                    },
+                    Choice {
+                        label: "en leasing".into(),
+                        area: area(0.5, 0.5, 0.02, 0.015),
+                    },
                 ],
                 ..Default::default()
             },
-            Field { label: "Téléphone".into(), area: None, ..Default::default() },
-            Field { label: "E-mail".into(), area: area(0.2, 0.3, 0.5, 0.03), ..Default::default() },
+            Field {
+                label: "Téléphone".into(),
+                area: None,
+                ..Default::default()
+            },
+            Field {
+                label: "E-mail".into(),
+                area: area(0.2, 0.3, 0.5, 0.03),
+                ..Default::default()
+            },
         ];
-        let answers = vec!["Dupont Jean".into(), "En leasing".into(), "079 000 00 00".into(), "  ".into()];
-        let (m, unplaced) = marks(&fields, &answers);
+        let answers = vec![
+            "Dupont Jean".into(),
+            "En leasing".into(),
+            "079 000 00 00".into(),
+            "  ".into(),
+        ];
+        let (m, unplaced) = marks(&fields, &answers, &Vec::new());
         assert_eq!(m.len(), 2);
         assert_eq!(m[0].text, "Dupont Jean");
         assert!(m[1].tick && (m[1].area.x - 0.5).abs() < 1e-6);
-        assert_eq!(unplaced, 1, "the phone has no box; the empty e-mail is not counted");
+        assert_eq!(
+            unplaced, 1,
+            "the phone has no box; the empty e-mail is not counted"
+        );
     }
 
     #[test]
     fn the_pdf_is_well_formed() {
         let img = image::DynamicImage::new_rgb8(40, 60);
         let mut jpeg = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg).unwrap();
-        let page = Page { jpeg, width: 40, height: 60, lines: Vec::new() };
-        let marks = vec![Mark { area: Area { x: 0.1, y: 0.1, w: 0.8, h: 0.05 }, text: "Zoë (né) à Genève".into(), tick: false }];
+        img.write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+        let page = Page {
+            jpeg,
+            width: 40,
+            height: 60,
+            lines: Vec::new(),
+            text_problem: None,
+        };
+        let marks = vec![
+            Mark {
+                area: Area {
+                    x: 0.1,
+                    y: 0.1,
+                    w: 0.8,
+                    h: 0.05,
+                },
+                text: "Zoë (né) à Genève".into(),
+                tick: false,
+                strokes: Vec::new(),
+            },
+            Mark {
+                area: Area {
+                    x: 0.1,
+                    y: 0.8,
+                    w: 0.5,
+                    h: 0.04,
+                },
+                text: String::new(),
+                tick: false,
+                strokes: vec![vec![[0.1, 0.2], [0.4, 0.1], [0.6, 0.25]]],
+            },
+        ];
         let pdf = pdf(&page, &marks);
         let text = String::from_utf8_lossy(&pdf);
         assert!(text.starts_with("%PDF-1.4"));
         assert!(text.trim_end().ends_with("%%EOF"));
         // The xref points at each object.
-        let start: usize = text.rsplit("startxref\n").next().unwrap().lines().next().unwrap().parse().unwrap();
+        let start: usize = text
+            .rsplit("startxref\n")
+            .next()
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(pdf[start..].starts_with(b"xref"));
         for n in 1..=7 {
             assert!(text.contains(&format!("\n{n} 0 obj\n")));
         }
         let latin: &[u8] = b"Zo\xeb \\(n\xe9\\) \xe0 G";
-        assert!(pdf.windows(latin.len()).any(|w| w == latin), "accents in WinAnsi, brackets escaped");
+        assert!(
+            pdf.windows(latin.len()).any(|w| w == latin),
+            "accents in WinAnsi, brackets escaped"
+        );
+        assert!(
+            text.contains(" RG ") && text.contains(" m\n") && text.contains("\nS\n"),
+            "the signature is stroked"
+        );
+    }
+
+    #[test]
+    fn the_signature_goes_on_its_line_only_when_signed() {
+        let fields = vec![
+            Field {
+                label: "Signature".into(),
+                signature: true,
+                area: area(0.5, 0.9, 0.3, 0.02),
+                ..Default::default()
+            },
+            Field {
+                label: "Unterschrift".into(),
+                ..Default::default()
+            },
+        ];
+        let mine: Strokes = vec![vec![[0.1, 0.2], [0.4, 0.1], [0.6, 0.25]]];
+        let (m, unplaced) = marks(
+            &fields,
+            &[signature::SIGNED.into(), signature::SIGNED.into()],
+            &mine,
+        );
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].strokes, mine);
+        assert_eq!(unplaced, 1, "the second has no place on the page");
+        // Signed on the box's bottom edge, within its width.
+        let (dx, dy, k) = sign_at(&m[0], 1000.0, 1000.0).unwrap();
+        assert!((dy + 0.25 * k - 920.0).abs() < 0.01);
+        assert!(dx + 0.1 * k >= 499.99 && dx + 0.6 * k <= 800.01);
+        assert!(0.15 * k <= 35.01, "no taller than about a row of print");
+        // Without a saved signature, nothing is drawn.
+        assert!(marks(&fields, &[signature::SIGNED.into()], &Vec::new())
+            .0
+            .is_empty());
     }
 
     #[test]
     fn file_names_are_tidy() {
-        assert_eq!(file_name("Demande de carte / résident"), "Demande de carte résident - filled.pdf");
+        assert_eq!(
+            file_name("Demande de carte / résident"),
+            "Demande de carte résident - filled.pdf"
+        );
         assert_eq!(file_name("  "), "Filled form.pdf");
     }
 }

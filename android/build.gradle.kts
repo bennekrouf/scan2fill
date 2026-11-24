@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.mayorana.scan2fil.platform"
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         minSdk = 24
         // Applied to the app's release build too.
@@ -27,4 +27,11 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     // Custom Tabs, for the sign-in page.
     implementation("androidx.browser:browser:1.8.0")
+    // Google's document scanner, run by Google Play services (it exists in
+    // no other form).
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+    // Google's text reader with its model inside the app (about 4 MB): it
+    // works from the first reading. The Play services version downloads its
+    // model in the background after install and fails until that's done.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }
